@@ -1,13 +1,16 @@
 #!/usr/bin/python
 
+from __future__ import print_function
+import ConfigParser
+import argparse
+import re
 import unittest
 
-# TODO: add finish conditions (max transport time for a passanger)
-# TODO: add first level specification (python) ?
-# TODO: add first elevator program
+
 # TODO: generate persons
-# TODO: add number of transported passangers
-# TODO: extract drawing from simulation
+# TODO: add first elevator program
+# TODO: extract drawing from the simulation
+# TODO: allow some actions to take longer time (e.g. exchaning passangers)
 
 
 
@@ -15,12 +18,28 @@ class Simulation:
     def __init__(self, floors_count):
         self.floors = [Floor(x) for x in range(floors_count)]
         self.elevators = []
+        self.transported_persons = 0
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
 
     def add_person(self, person, floor_number):
         self.floors[floor_number].add_person(person)
+
+    def all_persons(self):
+        for floor in self.floors:
+            for person in floor.persons:
+                yield person
+        for elevator in self.elevators:
+            for person in elevator.persons:
+                yield person
+
+    @property
+    def oldest_birth_date(self):
+        try:
+            return min(p.born_at for p in self.all_persons())
+        except ValueError:
+            return -1
 
     def _update_elevator(self, elevator):
         if elevator.state == Elevator.WAITING:
@@ -31,6 +50,7 @@ class Simulation:
             ]
             for person in outgoing:
                 elevator.persons.remove(person)
+                self.transported_persons += 1
             # onboard persons
             floor_number = elevator.floor_number
             floor = self.floors[floor_number]
@@ -65,8 +85,6 @@ class Simulation:
         '''
         for elevator in self.elevators:
             self._update_elevator(elevator)
-        elevator.step()
-                 
 
     def draw(self):
         '''
@@ -78,6 +96,7 @@ class Simulation:
         06 8^   
         05 8^ 6v w1,4,10,55              v2,4,5
         04 1v                    ^8
+        ...
 
         Means that on 5th floor there are 8th people wanting to go up
         and 6 people wanting to go down.
@@ -131,7 +150,7 @@ class Elevator:
         self.persons = []
         self.state = self.WAITING
         self.capacity = capacity
-        self.sign = ' '
+        self.sign = self.GOING_UP
    
     def add_person(self, person):
         if len(self.persons) == self.capacity:
@@ -154,8 +173,9 @@ class Elevator:
 
 
 class Person:
-    def __init__(self, destination):
+    def __init__(self, destination, simulation_step=0):
         self.destination = destination
+        self.born_at = simulation_step
 
     display_width = 2
 
@@ -187,5 +207,58 @@ class TestSimulation(unittest.TestCase):
             self.assertEqual(gline.rstrip('\n'), eline)
 
 
+def run_level(level):
+    parser = ConfigParser.SafeConfigParser()
+    parser.read('levels.ini')
+    section = 'level_{:02d}'.format(level)
+    steps = parser.getint(section, 'steps')
+    seed = parser.getint(section, 'seed')
+    max_waiting = parser.getint(section, 'max_waiting')
+    floors = parser.getint(section, 'floors')
+    elevators = parser.get(section, 'elevators')
+    elevators = map(int, elevators.split(','))
+    person_per_step = parser.getfloat(section, 'person_per_step')
+    destinations = {}
+    for option in parser.options(section):
+        match = re.match('^floor_([0-9]{2})_dest$', option)
+        if match:
+            destinations[int(match.group(1))] = parser.getfloat(section, option)
+
+    sim = Simulation(floors)
+    for capacity in elevators:
+        sim.add_elevator(Elevator(0, capacity))
+    for step in xrange(steps):
+        birth_date = sim.oldest_birth_date
+        if birth_date > -1 and step - birth_date > max_waiting:
+            print('Failure: Person waited more than {} steps.'.format(
+                max_waiting
+            ))
+            return
+        sim.step()
+        print('step:{} oldest:{} transported:{}'.format(
+            step,
+            step - birth_date if birth_date > -1 else 'None',
+            sim.transported_persons
+        ))
+        print(sim.draw())
+        print()
+    print(sim.transported_persons)
+
+
+def main():
+    parser = argparse.ArgumentParser('run elevator simulator')
+    parser.add_argument(
+        '--level', default=0, type=int, help='level to run')
+    #parser.add_argument(
+    #    '--log', default=sys.stdout, type=argparse.FileType('w'),
+    #    help='the file where the sum should be written')
+    args = parser.parse_args()
+    if args.level > 0:
+        run_level(args.level)
+    else:
+        unittest.main()
+        return
+
+
 if __name__ == '__main__':
-    unittest.main()
+    main()
