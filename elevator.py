@@ -3,15 +3,17 @@
 from __future__ import print_function
 import ConfigParser
 import argparse
+import random
 import re
 import unittest
 
 
-# TODO: generate persons
 # TODO: add first elevator program
 # TODO: extract drawing from the simulation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
-
+# TODO: design couple of levels
+# TODO: measure different algorithms
+# TODO: write blogpost
 
 
 class Simulation:
@@ -207,6 +209,37 @@ class TestSimulation(unittest.TestCase):
             self.assertEqual(gline.rstrip('\n'), eline)
 
 
+def normalize_probability(prob, floors):
+    set_prob = sum(prob.values())
+    if set_prob > 1.0:
+        prob = {k: p / set_prob for k, p in prob.items()}
+        set_prob = 1.0
+    remaining_prob = 1.0 - set_prob
+    remaining_values = floors - len(prob)
+    if remaining_values > 0:
+        p_per_value = remaining_prob / remaining_values
+        for floor in xrange(floors):
+            if floor not in prob:
+                prob[floor] = p_per_value
+
+
+def random_choice(density):
+    density = list(density)
+    value = random.random() * sum(v for k, v in density)
+    for key, prob in density:
+        if value <= prob:
+            return key
+        value -= prob
+
+
+def generate_person(sim, prob_src, prob_dest, step):
+    src_floor = random_choice(prob_src.items())
+    dest_floor = random_choice(
+        (k, v) for k, v in prob_dest.items() if k != src_floor
+    )
+    sim.add_person(Person(dest_floor, step), src_floor)
+
+
 def run_level(level):
     parser = ConfigParser.SafeConfigParser()
     parser.read('levels.ini')
@@ -217,17 +250,29 @@ def run_level(level):
     floors = parser.getint(section, 'floors')
     elevators = parser.get(section, 'elevators')
     elevators = map(int, elevators.split(','))
-    person_per_step = parser.getfloat(section, 'person_per_step')
-    destinations = {}
-    for option in parser.options(section):
-        match = re.match('^floor_([0-9]{2})_dest$', option)
-        if match:
-            destinations[int(match.group(1))] = parser.getfloat(section, option)
 
+    person_per_step = parser.getfloat(section, 'person_per_step')
+    prob_dest = {}
+    prob_src = {}
+    for option in parser.options(section):
+        match = re.match('^floor_([0-9]{2})_(dest|src)$', option)
+        if match:
+            floor = int(match.group(1))
+            probability = parser.getfloat(section, option)
+            if match.group(2) == 'dest':
+                prob_dest[floor] = probability
+            else:
+                prob_src[floor] = probability
+    normalize_probability(prob_dest, floors)
+    normalize_probability(prob_src, floors)
+
+    random.seed(seed)
     sim = Simulation(floors)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
     for step in xrange(steps):
+        if random.random() < person_per_step:
+            generate_person(sim, prob_src, prob_dest, step)
         birth_date = sim.oldest_birth_date
         if birth_date > -1 and step - birth_date > max_waiting:
             print('Failure: Person waited more than {} steps.'.format(
