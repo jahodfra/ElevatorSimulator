@@ -2,8 +2,13 @@
 
 import unittest
 
-# TODO: add information sign to the elevator
+# TODO: add finish conditions (max transport time for a passanger)
+# TODO: add first level specification (python) ?
+# TODO: add first elevator program
 # TODO: generate persons
+# TODO: add number of transported passangers
+# TODO: extract drawing from simulation
+
 
 
 class Simulation:
@@ -20,15 +25,29 @@ class Simulation:
     def _update_elevator(self, elevator):
         if elevator.state == Elevator.WAITING:
             # remove persons
-            outgoing = [
-                p for p elevator.persons
-                if p.destination == elevator.floor_number]
+            outgoing = [p
+                for p in elevator.persons
+                if p.destination == elevator.floor_number
+            ]
             for person in outgoing:
                 elevator.persons.remove(person)
             # onboard persons
-            floor = self.floors[elevator.floor_number]
-            while elevator.free_capacity > 0 and floor.persons:
-                elevator.add_person(floor.persons.pop())
+            floor_number = elevator.floor_number
+            floor = self.floors[floor_number]
+            if elevator.sign == Elevator.GOING_UP:
+                persons = [p
+                    for p in floor.persons
+                    if p.destination > floor_number
+                ]
+            elif elevator.sign == Elevator.GOING_DOWN:
+                persons = [p
+                    for p in floor.persons
+                    if p.destination < floor_number
+                ]
+            while elevator.free_capacity > 0 and persons:
+                person = persons.pop()
+                floor.persons.remove(person)
+                elevator.add_person(person)
         elif (elevator.state == Elevator.GOING_UP
               and elevator.floor_number + 1 < len(self.floors)):
             elevator.floor_number += 1
@@ -112,6 +131,7 @@ class Elevator:
         self.persons = []
         self.state = self.WAITING
         self.capacity = capacity
+        self.sign = ' '
    
     def add_person(self, person):
         if len(self.persons) == self.capacity:
@@ -120,7 +140,7 @@ class Elevator:
 
     @property
     def display_width(self):
-        return 1 + (Person.display_width+1) * self.capacity
+        return 2 + (Person.display_width+1) * self.capacity
 
     @property
     def free_capacity(self):
@@ -130,7 +150,7 @@ class Elevator:
         content = ','.join(
             p.draw() for p in sorted(self.persons, key=lambda p: p.destination)
         )
-        return self.state + content
+        return self.state + self.sign + content
 
 
 class Person:
@@ -147,9 +167,11 @@ class TestSimulation(unittest.TestCase):
     def test_draw(self):
         sim = Simulation(3)
         e1 = Elevator(0, 3)
+        e1.sign = Elevator.GOING_UP
         e1.add_person(Person(3))
         e1.add_person(Person(2))
         e2 = Elevator(2, 5)
+        e2.sign = Elevator.GOING_DOWN
         e2.add_person(Person(1))
         sim.add_elevator(e1)
         sim.add_elevator(e2)
@@ -158,9 +180,9 @@ class TestSimulation(unittest.TestCase):
         sim.add_person(Person(1), 2)
         generated = sim.draw()
         for gline, eline in zip(generated.split('\n'), [
-                ' 2 1v                  w1',
+                ' 2 1v                   wv1',
                 ' 1 1^ 1v',
-                ' 0          w2,3',
+                ' 0          w^2,3',
         ]):
             self.assertEqual(gline.rstrip('\n'), eline)
 
