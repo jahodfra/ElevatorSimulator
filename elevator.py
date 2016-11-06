@@ -8,8 +8,9 @@ import re
 import unittest
 
 
-# TODO: add first elevator program
+# TODO: allow running elevator program from other file
 # TODO: extract drawing from the simulation
+# TODO: differentiate when the elevator has opened/closed doors
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
 # TODO: measure different algorithms
@@ -17,13 +18,28 @@ import unittest
 
 
 class Simulation:
-    def __init__(self, floors_count):
+    def __init__(self, floors_count, program):
         self.floors = [Floor(x) for x in range(floors_count)]
         self.elevators = []
+        self.program = program
+        self.elevator_programs = []
         self.transported_persons = 0
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
+        state = StrippedState(
+            floor=elevator.floor_number,
+            destinations=[p.destination for p in elevator.persons],
+            floors_up=self._compute_persons_up(),
+            floors_down=self._compute_persons_down(),
+        )
+        program = self.program(
+            elevator_id=len(self.elevators),
+            capacity=elevator.capacity,
+            state=state,
+        )
+        program.next()
+        self.elevator_programs.append(program)
 
     def add_person(self, person, floor_number):
         self.floors[floor_number].add_person(person)
@@ -73,9 +89,21 @@ class Simulation:
         elif (elevator.state == Elevator.GOING_UP
               and elevator.floor_number + 1 < len(self.floors)):
             elevator.floor_number += 1
-        elif (elevator.state == Elevator.GOING_UP
+        elif (elevator.state == Elevator.GOING_DOWN
               and elevator.floor_number > 0):
             elevator.floor_number -= 1
+
+    def _compute_persons_up(self):
+        return [
+            any(person.destination > floor.number for person in floor.persons)
+            for floor in self.floors
+        ]
+
+    def _compute_persons_down(self):
+        return [
+            any(person.destination < floor.number for person in floor.persons)
+            for floor in self.floors
+        ]
 
     def step(self):
         '''
@@ -87,6 +115,21 @@ class Simulation:
         '''
         for elevator in self.elevators:
             self._update_elevator(elevator)
+        floors_up = self._compute_persons_up()
+        floors_down = self._compute_persons_down()
+        for elevator, program in zip(self.elevators, self.elevator_programs):
+            try:
+                state = StrippedState(
+                    floor=elevator.floor_number,
+                    destinations=[p.destination for p in elevator.persons],
+                    floors_up=floors_up,
+                    floors_down=floors_down,
+                )
+                new_state, new_sign = program.send(state)
+                elevator.state = new_state
+                elevator.sign = new_sign
+            except StopIteration:
+                pass
 
     def draw(self):
         '''
@@ -240,7 +283,62 @@ def generate_person(sim, prob_src, prob_dest, step):
     sim.add_person(Person(dest_floor, step), src_floor)
 
 
-def run_level(level):
+class StrippedState:
+    """Contains the visible state of the simulation
+
+    Attributes:
+        floor: int
+            Current floor
+        destinations: list of ints
+            Destination floors of persons in elevator, one number per person
+        floors_up: list of bools
+            For each floor a bool denoting if the up button is pushed
+        floors_down: list of bools
+            For each floor a bool denoting if the down button is pushed
+
+    """
+    def __init__(
+        self, floor, destinations, floors_up, floors_down
+    ):
+        self.floor = floor
+        self.destinations = destinations
+        self.floors_up = floors_up
+        self.floors_down = floors_down
+
+        
+def dummy_elevator_program(elevator_id, capacity):
+    """Computes the next action for an elevator.
+
+    Args:
+        elevator_id: int
+            Unique number of the current elevator
+        capacity: int
+            Number of person in elevator
+        state: StrippedState
+            State of the elevator
+    Yields: next action, next sign status
+        New status
+    Yield from: stripped_state
+        New state of the simulation
+    """
+    while True:
+        _new_state = yield(Elevator.WAITING, Elevator.GOING_UP)
+
+
+def simple_program(state, **kwrags):
+    floors = len(state.floors_up)
+    while True:
+        while state.floor < floors - 1:
+            if state.floors_up[state.floor]:
+                yield (Elevator.WAITING, Elevator.GOING_UP)
+            state = yield (Elevator.GOING_UP, Elevator.GOING_UP)
+        while state.floor > 0:
+            if state.floors_down[state.floor]:
+                yield (Elevator.WAITING, Elevator.GOING_DOWN)
+            state = yield (Elevator.GOING_DOWN, Elevator.GOING_DOWN)
+
+
+def run_level(level, program):
     parser = ConfigParser.SafeConfigParser()
     parser.read('levels.ini')
     section = 'level_{:02d}'.format(level)
@@ -267,7 +365,7 @@ def run_level(level):
     normalize_probability(prob_src, floors)
 
     random.seed(seed)
-    sim = Simulation(floors)
+    sim = Simulation(floors, program)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
     for step in xrange(steps):
@@ -299,7 +397,7 @@ def main():
     #    help='the file where the sum should be written')
     args = parser.parse_args()
     if args.level > 0:
-        run_level(args.level)
+        run_level(args.level, simple_program)
     else:
         unittest.main()
         return
