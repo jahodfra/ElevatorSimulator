@@ -1,7 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
-from __future__ import print_function
-import ConfigParser
+import configparser
 import argparse
 import importlib
 import random
@@ -9,7 +8,6 @@ import re
 import unittest
 
 
-# TODO: migrate to python3
 # TODO: simplify state
 #    events on calling the elevator up, down and person entering the elevator
 #    what happens where there will not be not enough space in elevator?
@@ -47,7 +45,7 @@ class Simulation:
             capacity=elevator.capacity,
             state=state,
         )
-        program.next()
+        next(program)
         self.elevator_programs.append(program)
 
     def add_person(self, person, floor_number):
@@ -279,7 +277,7 @@ def normalize_probability(prob, floors):
     remaining_values = floors - len(prob)
     if remaining_values > 0:
         p_per_value = remaining_prob / remaining_values
-        for floor in xrange(floors):
+        for floor in range(floors):
             if floor not in prob:
                 prob[floor] = p_per_value
 
@@ -344,7 +342,7 @@ def dummy_elevator_program(elevator_id, capacity):
 
 
 def run_level(level, program):
-    parser = ConfigParser.SafeConfigParser()
+    parser = configparser.SafeConfigParser()
     parser.read('levels.ini')
     section = 'level_{:02d}'.format(level)
     steps = parser.getint(section, 'steps')
@@ -373,7 +371,7 @@ def run_level(level, program):
     sim = Simulation(floors, program)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
-    for step in xrange(steps):
+    for step in range(steps):
         if random.random() < person_per_step:
             generate_person(sim, prob_src, prob_dest, step)
         birth_date = sim.oldest_birth_date
