@@ -3,12 +3,17 @@
 from __future__ import print_function
 import ConfigParser
 import argparse
+import importlib
 import random
 import re
 import unittest
 
 
 # TODO: allow running elevator program from other file
+# TODO: simplify state
+#    events on calling the elevator up, down and person entering the elevator
+#    what happens where there will not be not enough space in elevator?
+#    than the event has to be called again   
 # TODO: extract drawing from the simulation
 # TODO: differentiate when the elevator has opened/closed doors
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
@@ -325,19 +330,6 @@ def dummy_elevator_program(elevator_id, capacity):
         _new_state = yield(Elevator.WAITING, Elevator.GOING_UP)
 
 
-def simple_program(state, **kwrags):
-    floors = len(state.floors_up)
-    while True:
-        while state.floor < floors - 1:
-            if state.floors_up[state.floor]:
-                yield (Elevator.WAITING, Elevator.GOING_UP)
-            state = yield (Elevator.GOING_UP, Elevator.GOING_UP)
-        while state.floor > 0:
-            if state.floors_down[state.floor]:
-                yield (Elevator.WAITING, Elevator.GOING_DOWN)
-            state = yield (Elevator.GOING_DOWN, Elevator.GOING_DOWN)
-
-
 def run_level(level, program):
     parser = ConfigParser.SafeConfigParser()
     parser.read('levels.ini')
@@ -392,12 +384,19 @@ def main():
     parser = argparse.ArgumentParser('run elevator simulator')
     parser.add_argument(
         '--level', default=0, type=int, help='level to run')
+    parser.add_argument(
+        '--program', help='name of the module with a program')
     #parser.add_argument(
     #    '--log', default=sys.stdout, type=argparse.FileType('w'),
     #    help='the file where the sum should be written')
     args = parser.parse_args()
+    if args.program:
+        module = importlib.import_module(args.program)
+        program = module.elevator_step
+    else:
+        program = dummy_elevator_program
     if args.level > 0:
-        run_level(args.level, simple_program)
+        run_level(args.level, program)
     else:
         unittest.main()
         return
