@@ -9,17 +9,21 @@ import re
 import unittest
 
 
-# TODO: allow running elevator program from other file
+# TODO: migrate to python3
 # TODO: simplify state
 #    events on calling the elevator up, down and person entering the elevator
 #    what happens where there will not be not enough space in elevator?
-#    than the event has to be called again   
+#    than the event has to be called again
 # TODO: extract drawing from the simulation
 # TODO: differentiate when the elevator has opened/closed doors
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
 # TODO: measure different algorithms
 # TODO: write blogpost
+
+GO_UP = 'up'
+GO_DOWN = 'down'
+WAIT = 'wait'
 
 
 class Simulation:
@@ -65,9 +69,10 @@ class Simulation:
             return -1
 
     def _update_elevator(self, elevator):
-        if elevator.state == Elevator.WAITING:
+        if elevator.state == WAIT:
             # remove persons
-            outgoing = [p
+            outgoing = [
+                p
                 for p in elevator.persons
                 if p.destination == elevator.floor_number
             ]
@@ -77,13 +82,15 @@ class Simulation:
             # onboard persons
             floor_number = elevator.floor_number
             floor = self.floors[floor_number]
-            if elevator.sign == Elevator.GOING_UP:
-                persons = [p
+            if elevator.sign == GO_UP:
+                persons = [
+                    p
                     for p in floor.persons
                     if p.destination > floor_number
                 ]
-            elif elevator.sign == Elevator.GOING_DOWN:
-                persons = [p
+            elif elevator.sign == GO_DOWN:
+                persons = [
+                    p
                     for p in floor.persons
                     if p.destination < floor_number
                 ]
@@ -91,10 +98,10 @@ class Simulation:
                 person = persons.pop()
                 floor.persons.remove(person)
                 elevator.add_person(person)
-        elif (elevator.state == Elevator.GOING_UP
+        elif (elevator.state == GO_UP
               and elevator.floor_number + 1 < len(self.floors)):
             elevator.floor_number += 1
-        elif (elevator.state == Elevator.GOING_DOWN
+        elif (elevator.state == GO_DOWN
               and elevator.floor_number > 0):
             elevator.floor_number -= 1
 
@@ -113,7 +120,7 @@ class Simulation:
     def step(self):
         '''
         Run simulation step.
-        
+
         Move the elevators.
         Allow elevators to decide on the next action.
         Generate new pasangers.
@@ -141,9 +148,9 @@ class Simulation:
         Draws actual state of simulation
 
         Returns string with the content
-        
+
         e.g. for each floor
-        06 8^   
+        06 8^
         05 8^ 6v w1,4,10,55              v2,4,5
         04 1v                    ^8
         ...
@@ -161,7 +168,8 @@ class Simulation:
             parts = [part]
             for elevator in self.elevators:
                 if elevator.floor_number == floor.number:
-                    part = '{0:<{1}s}'.format(elevator.draw(), elevator.display_width)
+                    part = '{0:<{1}s}'.format(
+                        elevator.draw(), elevator.display_width)
                     parts.append(part)
                 else:
                     parts.append(' ' * elevator.display_width)
@@ -191,17 +199,13 @@ class Floor:
 
 
 class Elevator:
-    GOING_UP = '^'
-    GOING_DOWN = 'v'
-    WAITING = 'w'
-
     def __init__(self, floor_number, capacity=4):
         self.floor_number = floor_number
         self.persons = []
-        self.state = self.WAITING
+        self.state = WAIT
         self.capacity = capacity
-        self.sign = self.GOING_UP
-   
+        self.sign = GO_UP
+
     def add_person(self, person):
         if len(self.persons) == self.capacity:
             raise Exception('Cannot add person elevator is full')
@@ -219,7 +223,16 @@ class Elevator:
         content = ','.join(
             p.draw() for p in sorted(self.persons, key=lambda p: p.destination)
         )
-        return self.state + self.sign + content
+        state = {
+            GO_UP: '^',
+            GO_DOWN: 'v',
+            WAIT: 'w',
+        }[self.state]
+        sign = {
+            GO_UP: '^',
+            GO_DOWN: 'v',
+        }[self.sign]
+        return state + sign + content
 
 
 class Person:
@@ -237,11 +250,11 @@ class TestSimulation(unittest.TestCase):
     def test_draw(self):
         sim = Simulation(3)
         e1 = Elevator(0, 3)
-        e1.sign = Elevator.GOING_UP
+        e1.sign = GO_UP
         e1.add_person(Person(3))
         e1.add_person(Person(2))
         e2 = Elevator(2, 5)
-        e2.sign = Elevator.GOING_DOWN
+        e2.sign = GO_DOWN
         e2.add_person(Person(1))
         sim.add_elevator(e1)
         sim.add_elevator(e2)
@@ -310,7 +323,7 @@ class StrippedState:
         self.floors_up = floors_up
         self.floors_down = floors_down
 
-        
+
 def dummy_elevator_program(elevator_id, capacity):
     """Computes the next action for an elevator.
 
@@ -327,7 +340,7 @@ def dummy_elevator_program(elevator_id, capacity):
         New state of the simulation
     """
     while True:
-        _new_state = yield(Elevator.WAITING, Elevator.GOING_UP)
+        _new_state = yield(WAIT, GO_UP)
 
 
 def run_level(level, program):
@@ -386,9 +399,6 @@ def main():
         '--level', default=0, type=int, help='level to run')
     parser.add_argument(
         '--program', help='name of the module with a program')
-    #parser.add_argument(
-    #    '--log', default=sys.stdout, type=argparse.FileType('w'),
-    #    help='the file where the sum should be written')
     args = parser.parse_args()
     if args.program:
         module = importlib.import_module(args.program)

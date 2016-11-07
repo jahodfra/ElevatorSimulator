@@ -1,4 +1,4 @@
-from elevator import Elevator
+import elevator
 
 
 def elevator_step(state, **kwrags):
@@ -6,9 +6,9 @@ def elevator_step(state, **kwrags):
     while True:
         while state.floor < floors - 1:
             if state.floors_up[state.floor]:
-                yield (Elevator.WAITING, Elevator.GOING_UP)
-            state = yield (Elevator.GOING_UP, Elevator.GOING_UP)
+                yield (elevator.WAIT, elevator.GO_UP)
+            state = yield (elevator.GO_UP, elevator.GO_UP)
         while state.floor > 0:
             if state.floors_down[state.floor]:
-                yield (Elevator.WAITING, Elevator.GOING_DOWN)
-            state = yield (Elevator.GOING_DOWN, Elevator.GOING_DOWN)
+                yield (elevator.WAIT, elevator.GO_DOWN)
+            state = yield (elevator.GO_DOWN, elevator.GO_DOWN)
