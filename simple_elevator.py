@@ -13,7 +13,7 @@ class Program(ElevatorProgram):
     def call_elevator_down(self, floor):
         self.floors_down[floor] = True
 
-    def elevator_step(self, floor, **kwargs):
+    def generate_actions(self, elevator_id, floor):
         while True:
             while floor < self.floors - 1:
                 if self.floors_up[floor]:

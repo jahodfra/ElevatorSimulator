@@ -8,8 +8,7 @@ import re
 import unittest
 
 
-# TODO: move iterating generator into ElevatorProgram
-# TODO: merge sign and state
+# TODO: merge sign and state and add NOOP action
 # TODO: extract drawing from the simulation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
@@ -26,17 +25,10 @@ class Simulation:
         self.floors = [Floor(x) for x in range(floors_count)]
         self.elevators = []
         self.program = program
-        self.elevator_programs = []
         self.transported_persons = 0
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
-        program = self.program.elevator_step(
-            elevator_id=len(self.elevators),
-            floor=elevator.floor_number,
-        )
-        next(program)
-        self.elevator_programs.append(program)
 
     def add_person(self, person, floor_number):
         self.floors[floor_number].add_person(person)
@@ -112,13 +104,11 @@ class Simulation:
         '''
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
-        for elevator, program in zip(self.elevators, self.elevator_programs):
-            try:
-                new_state, new_sign = program.send(elevator.floor_number)
-                elevator.state = new_state
-                elevator.sign = new_sign
-            except StopIteration:
-                pass
+        for elevator_id, elevator in enumerate(self.elevators):
+            new_state, new_sign = self.program.step(
+                elevator_id, elevator.floor_number)
+            elevator.state = new_state
+            elevator.sign = new_sign
 
     def draw(self):
         '''
@@ -262,6 +252,7 @@ class ElevatorProgram:
     def __init__(self, floors, elevators):
         self.floors = floors
         self.elevators = elevators
+        self.action_generators = {}
 
     def call_elevator_up(self, floor):
         pass
@@ -272,7 +263,7 @@ class ElevatorProgram:
     def press_button(self, elevator_id, destination):
         pass
 
-    def elevator_step(self, elevator_id, floor):
+    def generate_actions(self, elevator_id, floor):
         """Computes the next action for an elevator.
 
         Dummy elevator program
@@ -286,6 +277,28 @@ class ElevatorProgram:
         """
         while True:
             _new_state = yield(WAIT, GO_UP)
+
+    def step(self, elevator_id, floor):
+        """Computes the next action for an elevator.
+
+        Dummy elevator program
+
+        Args:
+            elevator_id: int Unique number of the current elevator
+            floor: starting elevator floor
+        Yields: next action, next sign status
+            New status
+        Yield from: the current elevator floor
+        """
+        generator = self.action_generators.get(elevator_id)
+        if not generator:
+            generator = self.generate_actions(elevator_id, floor)
+            self.action_generators[elevator_id] = generator
+            next(generator)
+        try:
+            return generator.send(floor)
+        except StopIteration:
+            return WAIT, GO_UP
 
 
 def run_level(level, program_cls):
