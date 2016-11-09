@@ -8,7 +8,7 @@ import re
 import unittest
 
 
-# TODO: remove destinations
+# TODO: move iterating generator into ElevatorProgram
 # TODO: merge sign and state
 # TODO: extract drawing from the simulation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
@@ -31,13 +31,9 @@ class Simulation:
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
-        state = StrippedState(
-            floor=elevator.floor_number,
-            destinations=[p.destination for p in elevator.persons],
-        )
         program = self.program.elevator_step(
             elevator_id=len(self.elevators),
-            state=state,
+            floor=elevator.floor_number,
         )
         next(program)
         self.elevator_programs.append(program)
@@ -60,7 +56,8 @@ class Simulation:
         except ValueError:
             return -1
 
-    def _update_elevator(self, elevator):
+    def _update_elevator(self, elevator_id):
+        elevator = self.elevators[elevator_id]
         if elevator.state == WAIT:
             # remove persons
             outgoing = [
@@ -90,6 +87,7 @@ class Simulation:
                 person = persons.pop()
                 floor.persons.remove(person)
                 elevator.add_person(person)
+                self.program.press_button(elevator_id, person.destination)
             if persons:
                 # If there are remaining persons on the floor, let
                 # the elevator know that
@@ -112,15 +110,11 @@ class Simulation:
         Allow elevators to decide on the next action.
         Generate new pasangers.
         '''
-        for elevator in self.elevators:
-            self._update_elevator(elevator)
+        for elevator_id, _ in enumerate(self.elevators):
+            self._update_elevator(elevator_id)
         for elevator, program in zip(self.elevators, self.elevator_programs):
             try:
-                state = StrippedState(
-                    floor=elevator.floor_number,
-                    destinations=[p.destination for p in elevator.persons],
-                )
-                new_state, new_sign = program.send(state)
+                new_state, new_sign = program.send(elevator.floor_number)
                 elevator.state = new_state
                 elevator.sign = new_sign
             except StopIteration:
@@ -264,24 +258,10 @@ def generate_person(sim, prob_src, prob_dest, step):
         sim.program.call_elevator_down(src_floor)
 
 
-class StrippedState:
-    """Contains the visible state of the simulation
-
-    Attributes:
-        floor: int
-            Current floor
-        destinations: list of ints
-            Destination floors of persons in elevator, one number per person
-
-    """
-    def __init__(self, floor, destinations):
-        self.floor = floor
-        self.destinations = destinations
-
-
-class DummyElevatorProgram:
-    def init(self, floors, elevators):
-        pass
+class ElevatorProgram:
+    def __init__(self, floors, elevators):
+        self.floors = floors
+        self.elevators = elevators
 
     def call_elevator_up(self, floor):
         pass
@@ -289,26 +269,26 @@ class DummyElevatorProgram:
     def call_elevator_down(self, floor):
         pass
 
-    def elevator_step(self, elevator_id, state):
+    def press_button(self, elevator_id, destination):
+        pass
+
+    def elevator_step(self, elevator_id, floor):
         """Computes the next action for an elevator.
 
         Dummy elevator program
 
         Args:
-            elevator_id: int
-                Unique number of the current elevator
-            state: StrippedState
-                State of the elevator
+            elevator_id: int Unique number of the current elevator
+            floor: starting elevator floor
         Yields: next action, next sign status
             New status
-        Yield from: stripped_state
-            New state of the simulation
+        Yield from: the current elevator floor
         """
         while True:
             _new_state = yield(WAIT, GO_UP)
 
 
-def run_level(level, program):
+def run_level(level, program_cls):
     parser = configparser.SafeConfigParser()
     parser.read('levels.ini')
     section = 'level_{:02d}'.format(level)
@@ -335,7 +315,7 @@ def run_level(level, program):
     normalize_probability(prob_src, floors)
 
     random.seed(seed)
-    program.init(floors, len(elevators))
+    program = program_cls(floors, len(elevators))
     sim = Simulation(floors, program)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
@@ -391,9 +371,9 @@ def main():
         '--program', help='name of the module with a program')
     args = parser.parse_args()
     if args.program:
-        program = importlib.import_module(args.program)
+        program = importlib.import_module(args.program).Program
     else:
-        program = DummyElevatorProgram()
+        program = ElevatorProgram
     if args.level > 0:
         run_level(args.level, program)
     else:
