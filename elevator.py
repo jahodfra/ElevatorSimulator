@@ -8,7 +8,9 @@ import re
 import unittest
 
 
-# TODO: extract drawing from the simulation
+# TODO: add drawing with small digits
+# TODO: hide number of persons on floor
+# TODO: add ascii animation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
 # TODO: measure different algorithms
@@ -117,22 +119,59 @@ class Simulation:
             elevator.floor_number -= 1
 
     def step(self):
-        '''
-        Run simulation step.
+        """Run simulation step.
 
         Move the elevators.
         Allow elevators to decide on the next action.
         Generate new pasangers.
-        '''
+        """
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
         for elevator_id, elevator in enumerate(self.elevators):
             elevator.state = self.program.step(
                 elevator_id, elevator.floor_number)
 
-    def draw(self):
-        '''
-        Draws actual state of simulation
+
+class SimulationFormatter:
+
+    ELEVATOR_STATE_MAP = {
+        GO_UP: '^',
+        GO_DOWN: 'v',
+        ON_BOARD_UP: 'A',
+        ON_BOARD_DOWN: 'V',
+        ON_BOARD_ALL: 'X',
+        WAIT: '.',
+    }
+
+    def _draw_floor(self, floor):
+        people_up = sum(p.destination > floor.number for p in floor.persons)
+        people_down = sum(p.destination < floor.number for p in floor.persons)
+        output = '{0:2d}'.format(floor.number)
+        if people_up > 0:
+            output += ' {0}^'.format(people_up)
+        if people_down > 0:
+            output += ' {0}v'.format(people_down)
+        return output
+
+    floor_width = 2 + 1 + 3 + 1 + 3 + 1
+    person_width = 2
+
+    def _draw_person(self, person):
+        return str(person.destination)
+
+    def _elevator_width(self, elevator):
+        return 1 + (self.person_width+1) * elevator.capacity
+
+    def _draw_elevator(self, elevator):
+        content = ','.join(
+            self._draw_person(p)
+            for p in sorted(elevator.persons, key=lambda p: p.destination)
+        )
+        state = self.ELEVATOR_STATE_MAP[elevator.state]
+        return state + content
+
+    def draw(self, sim):
+        """Draws actual state of simulation
 
         Returns string with the content
 
@@ -148,18 +187,20 @@ class Simulation:
         floors 1, 4, 5, 10, 55.
         Elevator 2 is in a different floor.
         Elevator 3 goes down with people wanting to 2, 4, 5 floors.
-        '''
+        """
         lines = []
-        for floor in reversed(self.floors):
-            part = '{0:<{1}s}'.format(floor.draw(), floor.display_width)
+        for floor in reversed(sim.floors):
+            part = '{0:<{1}s}'.format(
+                self._draw_floor(floor), self.floor_width)
             parts = [part]
-            for elevator in self.elevators:
+            for elevator in sim.elevators:
+                width = self._elevator_width(elevator)
                 if elevator.floor_number == floor.number:
                     part = '{0:<{1}s}'.format(
-                        elevator.draw(), elevator.display_width)
+                        self._draw_elevator(elevator), width)
                     parts.append(part)
                 else:
-                    parts.append(' ' * elevator.display_width)
+                    parts.append(' ' * width)
             lines.append(' '.join(parts))
         return '\n'.join(line.rstrip() for line in lines)
 
@@ -168,18 +209,6 @@ class Floor:
     def __init__(self, number):
         self.number = number
         self.persons = []
-
-    display_width = 2 + 1 + 3 + 1 + 3 + 1
-
-    def draw(self):
-        people_up = sum(p.destination > self.number for p in self.persons)
-        people_down = sum(p.destination < self.number for p in self.persons)
-        output = '{0:2d}'.format(self.number)
-        if people_up > 0:
-            output += ' {0}^'.format(people_up)
-        if people_down > 0:
-            output += ' {0}v'.format(people_down)
-        return output
 
     def add_person(self, person):
         self.persons.append(person)
@@ -198,37 +227,14 @@ class Elevator:
         self.persons.append(person)
 
     @property
-    def display_width(self):
-        return 1 + (Person.display_width+1) * self.capacity
-
-    @property
     def free_capacity(self):
         return self.capacity - len(self.persons)
-
-    def draw(self):
-        content = ','.join(
-            p.draw() for p in sorted(self.persons, key=lambda p: p.destination)
-        )
-        state = {
-            GO_UP: '^',
-            GO_DOWN: 'v',
-            ON_BOARD_UP: 'A',
-            ON_BOARD_DOWN: 'V',
-            ON_BOARD_ALL: 'X',
-            WAIT: '.',
-        }[self.state]
-        return state + content
 
 
 class Person:
     def __init__(self, destination, simulation_step=0):
         self.destination = destination
         self.born_at = simulation_step
-
-    display_width = 2
-
-    def draw(self):
-        return str(self.destination)
 
 
 def normalize_probability(prob, floors):
@@ -365,7 +371,7 @@ def run_level(level, program_cls):
             step - birth_date if birth_date > -1 else 'None',
             sim.transported_persons
         ))
-        print(sim.draw())
+        print(SimulationFormatter().draw(sim))
         print()
     print(sim.transported_persons)
 
@@ -385,7 +391,7 @@ class TestSimulation(unittest.TestCase):
         sim.add_person(Person(0), 1)
         sim.add_person(Person(2), 1)
         sim.add_person(Person(1), 2)
-        generated = sim.draw()
+        generated = SimulationFormatter().draw(sim)
         for gline, eline in zip(generated.split('\n'), [
                 ' 2 1v                  .1',
                 ' 1 1^ 1v',
