@@ -1,4 +1,4 @@
-from elevator import ElevatorProgram, GO_UP, GO_DOWN, WAIT
+from elevator import *
 
 
 class Program(ElevatorProgram):
@@ -17,11 +17,11 @@ class Program(ElevatorProgram):
         while True:
             while floor < self.floors - 1:
                 if self.floors_up[floor]:
-                    yield (WAIT, GO_UP)
+                    yield ON_BOARD_UP
                     self.floors_up[floor] = False
-                floor = yield (GO_UP, GO_UP)
+                floor = yield GO_UP
             while floor > 0:
                 if self.floors_down[floor]:
-                    yield (WAIT, GO_DOWN)
+                    yield ON_BOARD_DOWN
                     self.floors_down[floor] = False
-                floor = yield (GO_DOWN, GO_DOWN)
+                floor = yield GO_DOWN

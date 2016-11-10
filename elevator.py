@@ -8,17 +8,23 @@ import re
 import unittest
 
 
-# TODO: merge sign and state and add NOOP action
 # TODO: extract drawing from the simulation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
 # TODO: measure different algorithms
 # TODO: write blogpost
 
+
 GO_UP = 'up'
 GO_DOWN = 'down'
 WAIT = 'wait'
+ON_BOARD_UP = 'on board passangers up'
+ON_BOARD_DOWN = 'on board passangers down'
+ON_BOARD_ALL = 'on board all passangers'
 
+
+__all__ = ('GO_UP GO_DOWN WAIT ON_BOARD_UP ON_BOARD_DOWN ON_BOARD_ALL'
+' ElevatorProgram').split(' ')
 
 class Simulation:
     def __init__(self, floors_count, program):
@@ -48,45 +54,61 @@ class Simulation:
         except ValueError:
             return -1
 
+    def _remove_persons_from_elevator(self, elevator):
+        outgoing = [
+            p
+            for p in elevator.persons
+            if p.destination == elevator.floor_number
+        ]
+        for person in outgoing:
+            elevator.persons.remove(person)
+            self.transported_persons += 1
+
+    def _on_board_persons(self, elevator_id, condition, callbacks):
+        elevator = self.elevators[elevator_id]
+        floor_number = elevator.floor_number
+        floor = self.floors[floor_number]
+        persons = [p for p in floor.persons if condition(p)]
+        while elevator.free_capacity > 0 and persons:
+            person = persons.pop()
+            floor.persons.remove(person)
+            elevator.add_person(person)
+            self.program.press_button(elevator_id, person.destination)
+        if persons:
+            # If there are remaining persons on the floor, let
+            # the elevator know that
+            for callback in callbacks:
+                callback(floor_number)
+
     def _update_elevator(self, elevator_id):
         elevator = self.elevators[elevator_id]
-        if elevator.state == WAIT:
-            # remove persons
-            outgoing = [
-                p
-                for p in elevator.persons
-                if p.destination == elevator.floor_number
-            ]
-            for person in outgoing:
-                elevator.persons.remove(person)
-                self.transported_persons += 1
-            # onboard persons
-            floor_number = elevator.floor_number
-            floor = self.floors[floor_number]
-            if elevator.sign == GO_UP:
-                persons = [
-                    p
-                    for p in floor.persons
-                    if p.destination > floor_number
-                ]
-            elif elevator.sign == GO_DOWN:
-                persons = [
-                    p
-                    for p in floor.persons
-                    if p.destination < floor_number
-                ]
-            while elevator.free_capacity > 0 and persons:
-                person = persons.pop()
-                floor.persons.remove(person)
-                elevator.add_person(person)
-                self.program.press_button(elevator_id, person.destination)
-            if persons:
-                # If there are remaining persons on the floor, let
-                # the elevator know that
-                if elevator.sign == GO_UP:
-                    self.program.call_elevator_up(floor_number)
-                else:
-                    self.program.call_elevator_down(floor_number)
+        state = elevator.state
+        if state == WAIT:
+            pass
+        elif state == ON_BOARD_UP:
+            self._remove_persons_from_elevator(elevator)
+            floor = elevator.floor_number
+            self._on_board_persons(
+                elevator_id,
+                lambda p: p.destination > floor,
+                [self.program.call_elevator_up]
+            )
+        elif state == ON_BOARD_DOWN:
+            self._remove_persons_from_elevator(elevator)
+            floor = elevator.floor_number
+            self._on_board_persons(
+                elevator_id,
+                lambda p: p.destination < floor,
+                [self.program.call_elevator_down]
+            )
+        elif state == ON_BOARD_ALL:
+            self._remove_persons_from_elevator(elevator)
+            floor = elevator.floor_number
+            self._on_board_persons(
+                elevator_id,
+                lambda p: p.destination != floor,
+                [self.program.call_elevator_up, self.program.call_elevator_down]
+            )
         elif (elevator.state == GO_UP and
               elevator.floor_number + 1 < len(self.floors)):
             elevator.floor_number += 1
@@ -105,10 +127,8 @@ class Simulation:
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
         for elevator_id, elevator in enumerate(self.elevators):
-            new_state, new_sign = self.program.step(
+            elevator.state = self.program.step(
                 elevator_id, elevator.floor_number)
-            elevator.state = new_state
-            elevator.sign = new_sign
 
     def draw(self):
         '''
@@ -171,7 +191,6 @@ class Elevator:
         self.persons = []
         self.state = WAIT
         self.capacity = capacity
-        self.sign = GO_UP
 
     def add_person(self, person):
         if len(self.persons) == self.capacity:
@@ -180,7 +199,7 @@ class Elevator:
 
     @property
     def display_width(self):
-        return 2 + (Person.display_width+1) * self.capacity
+        return 1 + (Person.display_width+1) * self.capacity
 
     @property
     def free_capacity(self):
@@ -193,13 +212,12 @@ class Elevator:
         state = {
             GO_UP: '^',
             GO_DOWN: 'v',
-            WAIT: 'w',
+            ON_BOARD_UP: 'A',
+            ON_BOARD_DOWN: 'V',
+            ON_BOARD_ALL: 'X',
+            WAIT: '.',
         }[self.state]
-        sign = {
-            GO_UP: '^',
-            GO_DOWN: 'v',
-        }[self.sign]
-        return state + sign + content
+        return state + content
 
 
 class Person:
@@ -276,7 +294,7 @@ class ElevatorProgram:
         Yield from: the current elevator floor
         """
         while True:
-            _new_state = yield(WAIT, GO_UP)
+            _floor = yield WAIT
 
     def step(self, elevator_id, floor):
         """Computes the next action for an elevator.
@@ -354,7 +372,7 @@ def run_level(level, program_cls):
 
 class TestSimulation(unittest.TestCase):
     def test_draw(self):
-        sim = Simulation(3)
+        sim = Simulation(3, ElevatorProgram)
         e1 = Elevator(0, 3)
         e1.sign = GO_UP
         e1.add_person(Person(3))
@@ -369,9 +387,9 @@ class TestSimulation(unittest.TestCase):
         sim.add_person(Person(1), 2)
         generated = sim.draw()
         for gline, eline in zip(generated.split('\n'), [
-                ' 2 1v                   wv1',
+                ' 2 1v                  .1',
                 ' 1 1^ 1v',
-                ' 0          w^2,3',
+                ' 0          .2,3',
         ]):
             self.assertEqual(gline.rstrip('\n'), eline)
 
