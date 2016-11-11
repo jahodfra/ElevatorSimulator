@@ -8,8 +8,6 @@ import re
 import unittest
 
 
-# TODO: add drawing with small digits
-# TODO: hide number of persons on floor
 # TODO: add ascii animation
 # TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
@@ -143,27 +141,50 @@ class SimulationFormatter:
         WAIT: '.',
     }
 
+    def __init__(self, floors=100, persons_on_floor=True):
+        digits = 1
+        while floors > 10:
+            digits += 1
+            floors /= 10
+        self.digits = digits
+        self.persons_on_floor = persons_on_floor
+
     def _draw_floor(self, floor):
         people_up = sum(p.destination > floor.number for p in floor.persons)
         people_down = sum(p.destination < floor.number for p in floor.persons)
-        output = '{0:2d}'.format(floor.number)
-        if people_up > 0:
-            output += ' {0}^'.format(people_up)
-        if people_down > 0:
-            output += ' {0}v'.format(people_down)
+        output = '{0:{1}d}'.format(floor.number, self.digits)
+        if self.persons_on_floor:
+            if people_up > 0:
+                output += ' {0}^'.format(people_up)
+            if people_down > 0:
+                output += ' {0}v'.format(people_down)
+        else:
+            if people_up and people_down:
+                output += 'x'
+            elif people_up:
+                output += '^'
+            elif people_down:
+                output += 'v'
+            else:
+                output += ' '
         return output
 
-    floor_width = 2 + 1 + 3 + 1 + 3 + 1
-    person_width = 2
+    def _floor_width(self):
+        if self.persons_on_floor:
+            return self.digits + 1 + 3 + 1 + 3 + 1
+        else:
+            return self.digits + 3
 
     def _draw_person(self, person):
-        return str(person.destination)
+        return str(person.destination % 10**self.digits)
 
     def _elevator_width(self, elevator):
-        return 1 + (self.person_width+1) * elevator.capacity
+        digits = 1 if self.digits == 1 else self.digits + 1
+        return 1 + digits * elevator.capacity
 
     def _draw_elevator(self, elevator):
-        content = ','.join(
+        separator = '' if self.digits == 1 else ','
+        content = separator.join(
             self._draw_person(p)
             for p in sorted(elevator.persons, key=lambda p: p.destination)
         )
@@ -191,7 +212,7 @@ class SimulationFormatter:
         lines = []
         for floor in reversed(sim.floors):
             part = '{0:<{1}s}'.format(
-                self._draw_floor(floor), self.floor_width)
+                self._draw_floor(floor), self._floor_width())
             parts = [part]
             for elevator in sim.elevators:
                 width = self._elevator_width(elevator)
@@ -354,6 +375,7 @@ def run_level(level, program_cls):
     random.seed(seed)
     program = program_cls(floors, len(elevators))
     sim = Simulation(floors, program)
+    formatter = SimulationFormatter(floors=floors, persons_on_floor=False)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
     for step in range(steps):
@@ -371,7 +393,7 @@ def run_level(level, program_cls):
             step - birth_date if birth_date > -1 else 'None',
             sim.transported_persons
         ))
-        print(SimulationFormatter().draw(sim))
+        print(formatter.draw(sim))
         print()
     print(sim.transported_persons)
 
