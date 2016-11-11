@@ -3,14 +3,16 @@
 import configparser
 import argparse
 import importlib
+import sys
+import time
 import random
 import re
 import unittest
 
 
-# TODO: add ascii animation
 # TODO: design couple of levels
 # TODO: measure different algorithms
+# TODO: allow clean output just to meassure algorithms
 # TODO: write blogpost
 
 
@@ -402,13 +404,19 @@ def run_level(level, program_cls):
             ))
             return
         sim.step()
+        if step != 0 and sys.stdout.isatty():
+            print('\33[{}F\33[J'.format(floors+1), end='')
         print('step:{} oldest:{} transported:{}'.format(
             step,
             step - birth_date if birth_date > -1 else 'None',
             sim.transported_persons
         ))
         print(formatter.draw(sim))
-        print()
+        if sys.stdout.isatty():
+            time.sleep(0.3)
+        else:
+            print()
+
     print(sim.transported_persons)
 
 
