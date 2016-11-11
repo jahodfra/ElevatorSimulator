@@ -9,7 +9,6 @@ import unittest
 
 
 # TODO: add ascii animation
-# TODO: allow some actions to take longer time (e.g. exchaning passangers)
 # TODO: design couple of levels
 # TODO: measure different algorithms
 # TODO: write blogpost
@@ -21,6 +20,15 @@ WAIT = 'wait'
 ON_BOARD_UP = 'on board passangers up'
 ON_BOARD_DOWN = 'on board passangers down'
 ON_BOARD_ALL = 'on board all passangers'
+
+ACTION_TIME = {
+    GO_UP: 1,
+    GO_DOWN: 1,
+    WAIT: 1,
+    ON_BOARD_UP: 3,
+    ON_BOARD_DOWN: 3,
+    ON_BOARD_ALL: 3,
+}
 
 
 __all__ = ('GO_UP GO_DOWN WAIT ON_BOARD_UP ON_BOARD_DOWN ON_BOARD_ALL'
@@ -82,6 +90,9 @@ class Simulation:
 
     def _update_elevator(self, elevator_id):
         elevator = self.elevators[elevator_id]
+        elevator.wait_time -= 1
+        if elevator.wait_time > 0:
+            return
         state = elevator.state
         if state == WAIT:
             pass
@@ -126,8 +137,10 @@ class Simulation:
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
         for elevator_id, elevator in enumerate(self.elevators):
-            elevator.state = self.program.step(
-                elevator_id, elevator.floor_number)
+            if elevator.wait_time <= 0:
+                elevator.state = self.program.step(
+                    elevator_id, elevator.floor_number)
+                elevator.wait_time = ACTION_TIME[elevator.state]
 
 
 class SimulationFormatter:
@@ -241,6 +254,7 @@ class Elevator:
         self.persons = []
         self.state = WAIT
         self.capacity = capacity
+        self.wait_time = 0
 
     def add_person(self, person):
         if len(self.persons) == self.capacity:
