@@ -13,7 +13,7 @@ import unittest
 
 # TODO: design couple of levels
 # TODO: measure different algorithms
-# TODO: allow clean output just to meassure algorithms
+# TODO: write README.md
 # TODO: write blogpost
 
 
@@ -374,7 +374,7 @@ class ElevatorProgram:
             return WAIT, GO_UP
 
 
-def run_level(level, program_cls):
+def run_level(level, program_cls, debug):
     parser = configparser.SafeConfigParser()
     parser.read('levels.ini')
     section = 'level_{:02d}'.format(level)
@@ -416,18 +416,19 @@ def run_level(level, program_cls):
             ))
             break
         sim.step()
-        if sim.step_counter != 0 and sys.stdout.isatty():
-            print('\33[{}F\33[J'.format(floors+1), end='')
-        print('step:{} oldest:{} transported:{}'.format(
-            sim.step_counter,
-            sim.step_counter - birth_date if birth_date > -1 else 'None',
-            len(sim.transport_times)
-        ))
-        print(formatter.draw(sim))
-        if sys.stdout.isatty():
-            time.sleep(0.3)
-        else:
-            print()
+        if debug:
+            if sim.step_counter != 0 and sys.stdout.isatty():
+                print('\33[{}F\33[J'.format(floors+1), end='')
+            print('step:{} oldest:{} transported:{}'.format(
+                sim.step_counter,
+                sim.step_counter - birth_date if birth_date > -1 else 'None',
+                len(sim.transport_times)
+            ))
+            print(formatter.draw(sim))
+            if sys.stdout.isatty():
+                time.sleep(0.3)
+            else:
+                print()
 
     print('persons:', len(sim.transport_times))
     if not sim.transport_times:
@@ -437,7 +438,6 @@ def run_level(level, program_cls):
     print('avg time:', statistics.mean(sim.transport_times))
     print('median time:', statistics.median(sim.transport_times))
     print('moves:', sim.move_counter)
-
 
 
 class TestSimulation(unittest.TestCase):
@@ -470,13 +470,16 @@ def main():
         '--level', default=0, type=int, help='level to run')
     parser.add_argument(
         '--program', help='name of the module with a program')
+    parser.add_argument(
+        '--debug', help='show detailed output', default=False,
+        action='store_true')
     args = parser.parse_args()
     if args.program:
         program = importlib.import_module(args.program).Program
     else:
         program = ElevatorProgram
     if args.level > 0:
-        run_level(args.level, program)
+        run_level(args.level, program, args.debug)
     else:
         unittest.main()
         return
