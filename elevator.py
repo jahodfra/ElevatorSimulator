@@ -3,6 +3,7 @@
 import configparser
 import argparse
 import importlib
+import statistics
 import sys
 import time
 import random
@@ -41,7 +42,8 @@ class Simulation:
         self.floors = [Floor(x) for x in range(floors_count)]
         self.elevators = []
         self.program = program
-        self.transported_persons = 0
+        self.transport_times = []
+        self.step_counter = 0
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
@@ -72,7 +74,7 @@ class Simulation:
         ]
         for person in outgoing:
             elevator.persons.remove(person)
-            self.transported_persons += 1
+            self.transport_times.append(sim.step_counter - person.birth_date)
 
     def _on_board_persons(self, elevator_id, condition, callbacks):
         elevator = self.elevators[elevator_id]
@@ -125,9 +127,11 @@ class Simulation:
         elif (elevator.state == GO_UP and
               elevator.floor_number + 1 < len(self.floors)):
             elevator.floor_number += 1
+            elevator.move_counter += 1
         elif (elevator.state == GO_DOWN and
               elevator.floor_number > 0):
             elevator.floor_number -= 1
+            elevator.move_counter += 1
 
     def step(self):
         """Run simulation step.
@@ -143,6 +147,13 @@ class Simulation:
                 elevator.state = self.program.step(
                     elevator_id, elevator.floor_number)
                 elevator.wait_time = ACTION_TIME[elevator.state]
+        self.step_counter += 1
+
+    @property
+    def move_counter(self):
+        if self.elevators:
+            return sum(elevator.move_counter for elevator in self.elevators)
+        return 0
 
 
 class SimulationFormatter:
@@ -257,6 +268,7 @@ class Elevator:
         self.state = WAIT
         self.capacity = capacity
         self.wait_time = 0
+        self.move_counter = 0
 
     def add_person(self, person):
         if len(self.persons) == self.capacity:
@@ -394,22 +406,22 @@ def run_level(level, program_cls):
     formatter = SimulationFormatter(floors=floors, persons_on_floor=False)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
-    for step in range(steps):
+    for _ in range(steps):
         if random.random() < person_per_step:
-            generate_person(sim, prob_src, prob_dest, step)
+            generate_person(sim, prob_src, prob_dest, sim.step_counter)
         birth_date = sim.oldest_birth_date
-        if birth_date > -1 and step - birth_date > max_waiting:
+        if birth_date > -1 and sim.step_counter - birth_date > max_waiting:
             print('Failure: Person waited more than {} steps.'.format(
                 max_waiting
             ))
-            return
+            break
         sim.step()
-        if step != 0 and sys.stdout.isatty():
+        if sim.step_counter != 0 and sys.stdout.isatty():
             print('\33[{}F\33[J'.format(floors+1), end='')
         print('step:{} oldest:{} transported:{}'.format(
-            step,
-            step - birth_date if birth_date > -1 else 'None',
-            sim.transported_persons
+            sim.step_counter,
+            sim.step_counter - birth_date if birth_date > -1 else 'None',
+            len(sim.transport_times)
         ))
         print(formatter.draw(sim))
         if sys.stdout.isatty():
@@ -417,7 +429,15 @@ def run_level(level, program_cls):
         else:
             print()
 
-    print(sim.transported_persons)
+    print('persons:', len(sim.transport_times))
+    if not sim.transport_times:
+        sim.transport_times.append(0)
+    print('min time:', min(sim.transport_times))
+    print('max time:', max(sim.transport_times))
+    print('avg time:', statistics.mean(sim.transport_times))
+    print('median time:', statistics.median(sim.transport_times))
+    print('moves:', sim.move_counter)
+
 
 
 class TestSimulation(unittest.TestCase):
