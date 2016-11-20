@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
+import bisect
 import configparser
 import argparse
 import importlib
+import itertools
 import statistics
 import sys
 import time
@@ -28,9 +30,9 @@ ACTION_TIME = {
     GO_UP: 1,
     GO_DOWN: 1,
     WAIT: 1,
-    ON_BOARD_UP: 3,
-    ON_BOARD_DOWN: 3,
-    ON_BOARD_ALL: 3,
+    ON_BOARD_UP: 2,
+    ON_BOARD_DOWN: 2,
+    ON_BOARD_ALL: 2,
 }
 
 
@@ -38,12 +40,14 @@ __all__ = ('GO_UP GO_DOWN WAIT ON_BOARD_UP ON_BOARD_DOWN ON_BOARD_ALL'
 ' ElevatorProgram').split(' ')
 
 class Simulation:
-    def __init__(self, floors_count, program):
+    def __init__(self, floors_count, program, person_generator, max_waiting):
         self.floors = [Floor(x) for x in range(floors_count)]
         self.elevators = []
         self.program = program
         self.transport_times = []
         self.step_counter = 0
+        self.max_waiting = max_waiting
+        self.person_generator = person_generator
 
     def add_elevator(self, elevator):
         self.elevators.append(elevator)
@@ -74,7 +78,7 @@ class Simulation:
         ]
         for person in outgoing:
             elevator.persons.remove(person)
-            self.transport_times.append(sim.step_counter - person.birth_date)
+            self.transport_times.append(self.step_counter - person.born_at)
 
     def _on_board_persons(self, elevator_id, condition, callbacks):
         elevator = self.elevators[elevator_id]
@@ -133,6 +137,15 @@ class Simulation:
             elevator.floor_number -= 1
             elevator.move_counter += 1
 
+    def _generate_person(self):
+        src_floor, dest_floor = self.person_generator()
+        if src_floor:
+            self.add_person(Person(dest_floor, self.step_counter), src_floor)
+            if dest_floor > src_floor:
+                self.program.call_elevator_up(src_floor)
+            else:
+                self.program.call_elevator_down(src_floor)
+
     def step(self):
         """Run simulation step.
 
@@ -140,6 +153,7 @@ class Simulation:
         Allow elevators to decide on the next action.
         Generate new pasangers.
         """
+        self._generate_person()
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
         for elevator_id, elevator in enumerate(self.elevators):
@@ -149,11 +163,39 @@ class Simulation:
                 elevator.wait_time = ACTION_TIME[elevator.state]
         self.step_counter += 1
 
+    def failed(self):
+        birth_date = self.oldest_birth_date
+        return (
+            birth_date > -1 and
+            self.step_counter - birth_date > self.max_waiting
+        )
+
     @property
     def move_counter(self):
         if self.elevators:
             return sum(elevator.move_counter for elevator in self.elevators)
         return 0
+
+
+class PersonGenerator:
+    def __init__(self, seed, prob_src, prob_dest, person_per_step):
+        self.random_sequence = random.Random()
+        self.random_sequence.seed(seed)
+        self.prob_src = prob_src
+        self.prob_dest = prob_dest
+        self.person_per_step = person_per_step
+
+    def generate(self):
+        if self.random_sequence.random() >= self.person_per_step:
+            return None, None
+        src_floor = random_choice(
+            self.prob_src.items(), self.random_sequence.random()
+        )
+        dest_floor = random_choice(
+            ((k, v) for k, v in self.prob_dest.items() if k != src_floor),
+            self.random_sequence.random()
+        )
+        return src_floor, dest_floor
 
 
 class SimulationFormatter:
@@ -300,25 +342,11 @@ def normalize_probability(prob, floors):
                 prob[floor] = p_per_value
 
 
-def random_choice(density):
-    density = list(density)
-    value = random.random() * sum(v for k, v in density)
-    for key, prob in density:
-        if value <= prob:
-            return key
-        value -= prob
-
-
-def generate_person(sim, prob_src, prob_dest, step):
-    src_floor = random_choice(prob_src.items())
-    dest_floor = random_choice(
-        (k, v) for k, v in prob_dest.items() if k != src_floor
-    )
-    sim.add_person(Person(dest_floor, step), src_floor)
-    if dest_floor > src_floor:
-        sim.program.call_elevator_up(src_floor)
-    else:
-        sim.program.call_elevator_down(src_floor)
+def random_choice(density, random_number):
+    choices, weights = zip(*density)
+    cumdist = list(itertools.accumulate(weights))
+    value = random_number * cumdist[-1]
+    return choices[bisect.bisect(cumdist, value)]
 
 
 class ElevatorProgram:
@@ -336,21 +364,6 @@ class ElevatorProgram:
     def press_button(self, elevator_id, destination):
         pass
 
-    def generate_actions(self, elevator_id, floor):
-        """Computes the next action for an elevator.
-
-        Dummy elevator program
-
-        Args:
-            elevator_id: int Unique number of the current elevator
-            floor: starting elevator floor
-        Yields: next action, next sign status
-            New status
-        Yield from: the current elevator floor
-        """
-        while True:
-            _floor = yield WAIT
-
     def step(self, elevator_id, floor):
         """Computes the next action for an elevator.
 
@@ -358,23 +371,30 @@ class ElevatorProgram:
 
         Args:
             elevator_id: int Unique number of the current elevator
-            floor: starting elevator floor
-        Yields: next action, next sign status
-            New status
-        Yield from: the current elevator floor
+            floor: elevator floor
+        Returns:
+            next action
         """
-        generator = self.action_generators.get(elevator_id)
-        if not generator:
-            generator = self.generate_actions(elevator_id, floor)
-            self.action_generators[elevator_id] = generator
-            next(generator)
-        try:
-            return generator.send(floor)
-        except StopIteration:
-            return WAIT, GO_UP
+        return WAIT
 
 
-def run_level(level, program_cls, debug):
+def print_state(sim, formatter):
+    if sim.step_counter != 0 and sys.stdout.isatty():
+        print('\33[{}F\33[J'.format(floors+1), end='')
+    birth_date = sim.oldest_birth_date
+    print('step:{} oldest:{} transported:{}'.format(
+        sim.step_counter,
+        sim.step_counter - birth_date if birth_date > -1 else 'None',
+        len(sim.transport_times)
+    ))
+    print(formatter.draw(sim))
+    if sys.stdout.isatty():
+        time.sleep(0.3)
+    else:
+        print()
+
+
+def load_level(level, program_cls):
     parser = configparser.SafeConfigParser()
     parser.read('levels.ini')
     section = 'level_{:02d}'.format(level)
@@ -400,35 +420,30 @@ def run_level(level, program_cls, debug):
     normalize_probability(prob_dest, floors)
     normalize_probability(prob_src, floors)
 
-    random.seed(seed)
     program = program_cls(floors, len(elevators))
-    sim = Simulation(floors, program)
-    formatter = SimulationFormatter(floors=floors, persons_on_floor=False)
+    generator = (
+        PersonGenerator(seed, prob_src, prob_dest, person_per_step).generate
+    )
+    sim = Simulation(floors, program, generator, max_waiting)
     for capacity in elevators:
         sim.add_elevator(Elevator(0, capacity))
+    return sim, steps
+
+
+def run_level(level, program_cls, debug):
+    sim, steps = load_level(level, program_cls)
+    formatter = SimulationFormatter(
+        floors=len(sim.floors), persons_on_floor=False)
     for _ in range(steps):
-        if random.random() < person_per_step:
-            generate_person(sim, prob_src, prob_dest, sim.step_counter)
         birth_date = sim.oldest_birth_date
-        if birth_date > -1 and sim.step_counter - birth_date > max_waiting:
+        if sim.failed():
             print('Failure: Person waited more than {} steps.'.format(
-                max_waiting
+                sim.max_waiting
             ))
             break
         sim.step()
         if debug:
-            if sim.step_counter != 0 and sys.stdout.isatty():
-                print('\33[{}F\33[J'.format(floors+1), end='')
-            print('step:{} oldest:{} transported:{}'.format(
-                sim.step_counter,
-                sim.step_counter - birth_date if birth_date > -1 else 'None',
-                len(sim.transport_times)
-            ))
-            print(formatter.draw(sim))
-            if sys.stdout.isatty():
-                time.sleep(0.3)
-            else:
-                print()
+            print_state(sim, formatter)
 
     print('persons:', len(sim.transport_times))
     if not sim.transport_times:
@@ -442,7 +457,8 @@ def run_level(level, program_cls, debug):
 
 class TestSimulation(unittest.TestCase):
     def test_draw(self):
-        sim = Simulation(3, ElevatorProgram)
+        generator = lambda: None, None
+        sim = Simulation(3, ElevatorProgram, generator, 1)
         e1 = Elevator(0, 3)
         e1.sign = GO_UP
         e1.add_person(Person(3))
