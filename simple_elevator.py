@@ -4,30 +4,45 @@ import random
 
 from elevator import *
 
+UP = True
+DOWN = False
+
 
 class Elevator:
     def __init__(self):
         self.floor = 0
-        self.direction = True
+        self.direction = UP
         self.exits = set()
         self.enter_up = set()
         self.enter_down = set()
         self.action = WAIT
         self.wait_floor = 0
 
+    def score(self, floor, direction, n_floors):
+        # take the most optimistic estimation (but still admissible)
+        if (floor == self.floor and direction == self.direction and
+            self.action in (ON_BOARD_UP, ON_BOARD_DOWN)
+        ):
+            # This check prevents elevator to stop again if there is not enough
+            # people in it.
+            return 100000
+        # TODO: take into account number of stops
+        # TODO: elevator does not have to go to the last floor
+        if direction:
+            if self.floor < floor:
+                return floor - self.floor
+            else:
+                return 2 * n_floors - self.floor - floor - 1
+        else:
+            if self.floor < floor:
+                return self.floor + floor - 1
+            else:
+                return self.floor - floor
+
     def add_target(self, floor):
         self.exits.add(floor)
 
     def is_serving(self, floor, direction):
-        if (floor == self.floor and direction == self.direction and
-            self.action in (ON_BOARD_UP, ON_BOARD_DOWN)
-        ):
-            # This check prevents elevator to stop if there is not enough
-            # people in it.
-            # FIXME: that also leads to persons in the floor being ignored
-            # check should probably mean that the other elevator should service
-            # the floor.
-            return True
         if direction:
             return floor in self.enter_up
         else:
@@ -55,10 +70,10 @@ class Elevator:
         if self.is_unused():
             # We should move to the waiting floor.
             if self.floor < self.wait_floor:
-                self.direction = True
+                self.direction = UP
                 self.move()
             elif self.floor > self.wait_floor:
-                self.direction = False
+                self.direction = DOWN
                 self.move()
             else:
                 self.wait()
@@ -97,37 +112,53 @@ class Program(ElevatorProgram):
     def __init__(self, floors, elevators):
         super().__init__(floors, elevators)
         self._elevators = [Elevator() for _ in range(elevators)]
+        self._actions = []
+        # TODO: elevator default positions are set to 0. Finding optimal
+        # default positions is the different optimalization.
+        # That should not influence score over load much.
 
     def _select_elevator(self, floor, direction):
-        # TODO: choose the most appropriate elevator
-        # or round robin for the start
-        return self._elevators[random.randint(0, self.elevators-1)]
+        return min(
+            self._elevators,
+            key=lambda elevator: elevator.score(floor, direction, self.floors)
+        )
 
     def _dispatch_elevator(self, floor, direction):
         # should program dispatch all actions immediately or is better
         # to queue actions?
         # it is better to wait because some floor can be served by other
         # elevators
+        # should elevators have own queues?
+        # how to reschedule what elevators were already asked to do?
+        # TODO: assign actions temporarily (next round the action can be
+        # assigned to somebody else)
         if any(
             elevator.is_serving(floor, direction)
             for elevator in self._elevators
         ):
                 # Do nothing.
                 return
+        # TODO: consider global level state optimalizations 
         elevator = self._select_elevator(floor, direction)
         elevator.dispatch(floor, direction)
 
     def call_elevator_up(self, floor):
-        self._dispatch_elevator(floor, True)
+        self._actions.append((floor, UP))
 
     def call_elevator_down(self, floor):
-        self._dispatch_elevator(floor, False)
+        self._actions.append((floor, DOWN))
 
     def press_button(self, elevator_id, destination):
         self._elevators[elevator_id].add_target(destination)
 
-    def step(self, elevator_id, floor):
-        elevator = self._elevators[elevator_id]
-        elevator.floor = floor
-        elevator.step()
-        return elevator.action
+    def step(self, floors):
+        for floor, direction in self._actions:
+            self._dispatch_elevator(floor, direction)
+        self._actions = []
+        actions = []
+        for elevator_id, floor in enumerate(floors):
+            elevator = self._elevators[elevator_id]
+            elevator.floor = floor
+            elevator.step()
+            actions.append(elevator.action)
+        return actions

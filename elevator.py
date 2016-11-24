@@ -139,7 +139,7 @@ class Simulation:
 
     def _generate_person(self):
         src_floor, dest_floor = self.person_generator()
-        if src_floor:
+        if src_floor is not None:
             self.add_person(Person(dest_floor, self.step_counter), src_floor)
             if dest_floor > src_floor:
                 self.program.call_elevator_up(src_floor)
@@ -156,11 +156,13 @@ class Simulation:
         self._generate_person()
         for elevator_id, _ in enumerate(self.elevators):
             self._update_elevator(elevator_id)
-        for elevator_id, elevator in enumerate(self.elevators):
+        actions = self.program.step(
+            [elevator.floor_number for elevator in self.elevators]
+        )
+        for elevator, action in zip(self.elevators, actions):
             if elevator.wait_time <= 0:
-                elevator.state = self.program.step(
-                    elevator_id, elevator.floor_number)
-                elevator.wait_time = ACTION_TIME[elevator.state]
+                elevator.state = action
+                elevator.wait_time = ACTION_TIME[action]
         self.step_counter += 1
 
     def failed(self):
@@ -364,23 +366,23 @@ class ElevatorProgram:
     def press_button(self, elevator_id, destination):
         pass
 
-    def step(self, elevator_id, floor):
+    def step(self, floors):
         """Computes the next action for an elevator.
 
         Dummy elevator program
 
         Args:
-            elevator_id: int Unique number of the current elevator
-            floor: elevator floor
+            floors: position of all elevators. If the elevator is waiting the
+            action for it is ignored.
         Returns:
-            next action
+            list with actions for all elevators
         """
-        return WAIT
+        return [WAIT] * len(floors)
 
 
-def print_state(sim, formatter):
+def print_state(sim, formatter, n_floors):
     if sim.step_counter != 0 and sys.stdout.isatty():
-        print('\33[{}F\33[J'.format(floors+1), end='')
+        print('\33[{}F\33[J'.format(n_floors+1), end='')
     birth_date = sim.oldest_birth_date
     print('step:{} oldest:{} transported:{}'.format(
         sim.step_counter,
@@ -443,7 +445,7 @@ def run_level(level, program_cls, debug):
             break
         sim.step()
         if debug:
-            print_state(sim, formatter)
+            print_state(sim, formatter, len(sim.floors))
 
     print('persons:', len(sim.transport_times))
     if not sim.transport_times:
